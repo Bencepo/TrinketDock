@@ -9,6 +9,7 @@ ignore = { "113", "212/self" }
 
 globals = {
 	"SlashCmdList",
+	"ColorPickerFrame",
 	"TrinketDockDB",
 	"TrinketDock_OnCompartmentClick",
 	"BINDING_HEADER_TRINKETDOCK",

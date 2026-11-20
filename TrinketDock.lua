@@ -24,6 +24,11 @@ local DEFAULTS = {
 	direction = "UP",
 	tooltips = true,
 	hidden = false,
+	border = false,     -- thin frame around the dock
+	background = false, -- dark background behind the dock
+	alpha = 100,        -- opacity of the whole dock in percent (0 = invisible, still clickable)
+	borderColor = { 0.35, 0.40, 0.47 },    -- r, g, b of the frame
+	bgColor = { 0.059, 0.075, 0.094, 0.85 }, -- r, g, b, a of the background
 }
 
 local db
@@ -172,6 +177,44 @@ local function Layout()
 	dock:SetShown(not db.hidden)
 end
 
+-- Frame, background and opacity. None of it is protected, so it also applies in combat.
+local WHITE = "Interface\\Buttons\\WHITE8x8"
+local function ApplyLook()
+	if not dock then return end
+	local bg, c, f = dock.bg, db.bgColor, db.borderColor
+	bg:SetBackdropColor(c[1], c[2], c[3], db.background and (c[4] or 0.85) or 0)
+	bg:SetBackdropBorderColor(f[1], f[2], f[3], db.border and 1 or 0)
+	dock:SetAlpha((tonumber(db.alpha) or 100) / 100)
+end
+
+-- Game colour picker for the frame or the background (the background also gets an opacity).
+local function PickColor(key, withAlpha)
+	local c = db[key]
+	local r, g, b, a = c[1], c[2], c[3], c[4] or 1
+	local modern = ColorPickerFrame.SetupColorPickerAndShow ~= nil
+	withAlpha = withAlpha and modern and ColorPickerFrame.GetColorAlpha ~= nil
+	local function set(nr, ng, nb, na)
+		db[key] = withAlpha and { nr, ng, nb, na } or { nr, ng, nb, c[4] }
+		ApplyLook()
+		if settingsWin then settingsWin:Refresh() end
+	end
+	local function swatch()
+		local nr, ng, nb = ColorPickerFrame:GetColorRGB()
+		set(nr, ng, nb, withAlpha and ColorPickerFrame:GetColorAlpha() or a)
+	end
+	local function cancel() set(r, g, b, a) end
+	if modern then
+		ColorPickerFrame:SetupColorPickerAndShow({ r = r, g = g, b = b, opacity = a, hasOpacity = withAlpha,
+			swatchFunc = swatch, opacityFunc = swatch, cancelFunc = cancel })
+	else
+		ColorPickerFrame.hasOpacity = false
+		ColorPickerFrame.func = swatch
+		ColorPickerFrame.cancelFunc = cancel
+		ColorPickerFrame:SetColorRGB(r, g, b)
+		ColorPickerFrame:Show()
+	end
+end
+
 local function SavePosition()
 	local p, _, rp, x, y = dock:GetPoint()
 	db.point = { p, rp, x, y }
@@ -255,6 +298,12 @@ local function Create()
 	dock = CreateFrame("Frame", "TrinketDockFrame", UIParent)
 	dock:SetMovable(true)
 	dock:SetClampedToScreen(true)
+	-- Frame and background sit behind the buttons, a few pixels around them.
+	dock.bg = CreateFrame("Frame", nil, dock, "BackdropTemplate")
+	dock.bg:SetPoint("TOPLEFT", -4, 4)
+	dock.bg:SetPoint("BOTTOMRIGHT", 4, -4)
+	dock.bg:SetFrameLevel(dock:GetFrameLevel())
+	dock.bg:SetBackdrop({ bgFile = WHITE, edgeFile = WHITE, edgeSize = 1 })
 
 	flyout = CreateFrame("Frame", nil, UIParent)
 	flyout:SetFrameStrata("DIALOG")
@@ -327,6 +376,7 @@ local function Create()
 		buttons[i] = b
 	end
 	Layout()
+	ApplyLook()
 	UpdateAll()
 end
 
@@ -338,7 +388,7 @@ local function BuildSettings()
 	local UI = LibStub("BencepoUI-1.0")
 	settingsWin = UI:CreateWindow({
 		name = "TrinketDockSettingsFrame", title = "TrinketDock", subtitle = VERSION,
-		width = 400, height = 300, accent = { 0.31, 0.76, 0.97, 1 },
+		width = 400, height = 410, accent = { 0.31, 0.76, 0.97, 1 },
 		db = db, posKey = "settingsPoint", bugUrl = BUG_URL,
 	})
 	local w = settingsWin
@@ -366,7 +416,38 @@ local function BuildSettings()
 	end, "Moves the dock back to the middle of the screen.")
 	reset:SetPoint("TOPLEFT", 210, -130)
 
-	w:Text(X, -232, "Click a button to use the trinket. Hover it for the flyout: left-click equips to the top slot, right-click to the bottom slot. In combat the swap is queued and done when combat ends. Keybindings: Options > Keybindings > TrinketDock.", 368)
+	w:Header(210, -172, "Look")
+	w:Check(210, -196, "Frame", "A thin frame around the dock.",
+		function() return db.border end, function(v) db.border = v and true or false ApplyLook() end)
+	w:Check(210, -220, "Background", "A dark background behind the dock.",
+		function() return db.background end, function(v) db.background = v and true or false ApplyLook() end)
+	-- Colour swatches next to the switches: click opens the game's colour picker.
+	local function Swatch(y, key, label, tip, withAlpha)
+		local sw = w:Button(label, 36, function() PickColor(key, withAlpha) end, tip)
+		sw:SetText("")
+		sw:SetPoint("TOPLEFT", 340, y + 2)
+		sw:SetHeight(18)
+		local fill = sw:CreateTexture(nil, "ARTWORK")
+		fill:SetPoint("TOPLEFT", 3, -3)
+		fill:SetPoint("BOTTOMRIGHT", -3, 3)
+		w:OnRefresh(function()
+			local c = db[key]
+			fill:SetColorTexture(c[1], c[2], c[3], 1)
+		end)
+	end
+	Swatch(-196, "borderColor", "Frame colour", "Colour of the frame. Click to pick.", false)
+	Swatch(-220, "bgColor", "Background colour", "Colour and opacity of the background. Click to pick.", true)
+	local resetLook = w:Button("Reset colours", 120, function()
+		db.borderColor = CopyTable(DEFAULTS.borderColor)
+		db.bgColor = CopyTable(DEFAULTS.bgColor)
+		ApplyLook()
+	end, "Back to the default frame and background colours.")
+	resetLook:SetPoint("TOPLEFT", 210, -296)
+	w:Slider(210, -252, "Opacity", 0, 100, 5, function() return db.alpha end,
+		function(v) db.alpha = v ApplyLook() end, "Opacity of the whole dock. At 0% it is invisible but still clickable, and keybindings keep working.", 140,
+		function(v) return ("%d%%"):format(v) end)
+
+	w:Text(X, -336, "Click a button to use the trinket. Hover it for the flyout: left-click equips to the top slot, right-click to the bottom slot. In combat the swap is queued and done when combat ends. Keybindings: Options > Keybindings > TrinketDock.", 368)
 end
 
 local function ToggleSettings()
@@ -415,7 +496,7 @@ events:SetScript("OnEvent", function(_, event, arg1)
 		TrinketDockDB = TrinketDockDB or {}
 		db = TrinketDockDB
 		for k, v in pairs(DEFAULTS) do
-			if db[k] == nil then db[k] = v end
+			if db[k] == nil then db[k] = type(v) == "table" and CopyTable(v) or v end
 		end
 		-- 0.1.0 saved { point, "UIParent", relPoint, x, y }
 		if db.point and db.point[2] == "UIParent" then

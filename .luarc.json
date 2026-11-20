@@ -10,6 +10,8 @@
   ],
   "diagnostics.globals": [
     "BINDING_HEADER_TRINKETDOCK",
+    "ColorPickerFrame",
+    "CopyTable",
     "CreateSettingsButtonInitializer",
     "Settings",
     "SettingsPanel",
