@@ -8,7 +8,7 @@
 ## X-Curse-Project-ID: 1818466
 ## X-Wago-ID: YK9xXX6L
 ## SavedVariables: TrinketDockDB
-## IconTexture: Interface\Icons\INV_Jewelry_Talisman_07
+## IconTexture: Interface\AddOns\TrinketDock\Icons\minimap
 ## AddonCompartmentFunc: TrinketDock_OnCompartmentClick
 
 Libs\LibStub\LibStub.lua
