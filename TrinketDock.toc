@@ -5,6 +5,8 @@
 ## Version: @project-version@
 ## X-Website: https://bencepo.github.io/trinketdock/
 ## X-License: All Rights Reserved
+## X-Curse-Project-ID: 1818466
+## X-Wago-ID: YK9xXX6L
 ## SavedVariables: TrinketDockDB
 ## IconTexture: Interface\Icons\INV_Jewelry_Talisman_07
 ## AddonCompartmentFunc: TrinketDock_OnCompartmentClick
