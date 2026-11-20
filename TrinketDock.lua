@@ -29,6 +29,7 @@ local DEFAULTS = {
 local db
 local dock, flyout, settingsWin
 local buttons, flyButtons = {}, {}
+local queue = {}                -- [13|14] = { link, icon }: swap waiting for the end of combat
 local pendingLayout = false
 
 BINDING_HEADER_TRINKETDOCK = "TrinketDock"
@@ -59,15 +60,51 @@ local function BagTrinkets()
 	return list
 end
 
-local function Equip(entry, invSlot)
-	if InCombatLockdown() then
-		print(PREFIX .. "trinkets cannot be swapped in combat.")
-		return
+local function FindInBags(link)
+	for bag = 0, 4 do
+		for slot = 1, C_Container.GetContainerNumSlots(bag) or 0 do
+			local info = C_Container.GetContainerItemInfo(bag, slot)
+			if info and info.hyperlink == link then return bag, slot end
+		end
 	end
+end
+
+local function SwapNow(bag, slot, invSlot)
 	ClearCursor()
-	C_Container.PickupContainerItem(entry.bag, entry.slot)
+	C_Container.PickupContainerItem(bag, slot)
 	PickupInventoryItem(invSlot)
 	ClearCursor()
+end
+
+local UpdateQueue -- defined with the dock
+
+-- In combat the swap is queued and done as soon as combat ends; the same click again cancels it.
+local function Equip(entry, invSlot)
+	if InCombatLockdown() then
+		local q = queue[invSlot]
+		if q and q.link == entry.link then
+			queue[invSlot] = nil
+		else
+			queue[invSlot] = { link = entry.link, icon = entry.icon }
+			local other = invSlot == 13 and 14 or 13
+			if queue[other] and queue[other].link == entry.link then queue[other] = nil end
+		end
+		UpdateQueue()
+		return
+	end
+	SwapNow(entry.bag, entry.slot, invSlot)
+end
+
+local function RunQueue()
+	for _, invSlot in ipairs(SLOTS) do
+		local q = queue[invSlot]
+		if q then
+			queue[invSlot] = nil
+			local bag, slot = FindInBags(q.link)
+			if bag then SwapNow(bag, slot, invSlot) end
+		end
+	end
+	UpdateQueue()
 end
 
 local function SetCooldown(cd, start, duration, enable)
@@ -91,6 +128,22 @@ end
 
 local function UpdateAll()
 	for _, b in ipairs(buttons) do UpdateButton(b) end
+end
+
+-- Small icon in the corner of a dock button: the trinket queued for that slot.
+function UpdateQueue()
+	for _, b in ipairs(buttons) do
+		local q = queue[b.slot]
+		b.queued:SetShown(q ~= nil)
+		b.queuedBorder:SetShown(q ~= nil)
+		if q then b.queued:SetTexture(q.icon) end
+	end
+	for _, fb in ipairs(flyButtons) do
+		if fb:IsShown() and fb.entry then
+			local mark = (queue[13] and queue[13].link == fb.entry.link) or (queue[14] and queue[14].link == fb.entry.link)
+			fb.mark:SetShown(mark and true or false)
+		end
+	end
 end
 
 -- Secure buttons cannot be moved, scaled or hidden in combat: the change waits for combat to end.
@@ -143,6 +196,11 @@ local function FlyButton(i)
 	fb:SetHighlightTexture("Interface\\Buttons\\ButtonHilight-Square", "ADD")
 	fb.cd = CreateFrame("Cooldown", nil, fb, "CooldownFrameTemplate")
 	fb.cd:SetAllPoints()
+	fb.mark = fb:CreateTexture(nil, "OVERLAY")
+	fb.mark:SetTexture("Interface\\Buttons\\CheckButtonHilight")
+	fb.mark:SetBlendMode("ADD")
+	fb.mark:SetAllPoints()
+	fb.mark:Hide()
 	fb:SetScript("OnClick", function(self, mouse)
 		Equip(self.entry, mouse == "RightButton" and 14 or 13)
 		HideFlyout()
@@ -152,6 +210,7 @@ local function FlyButton(i)
 		GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
 		GameTooltip:SetBagItem(self.entry.bag, self.entry.slot)
 		GameTooltip:AddLine("Left-click: top slot   Right-click: bottom slot", 0.31, 0.76, 0.97)
+		if InCombatLockdown() then GameTooltip:AddLine("In combat: queued, swapped when combat ends", 1, 0.82, 0) end
 		GameTooltip:Show()
 	end)
 	fb:SetScript("OnLeave", function() GameTooltip:Hide() end)
@@ -160,7 +219,6 @@ local function FlyButton(i)
 end
 
 local function ShowFlyout(anchor)
-	if InCombatLockdown() then return end
 	local list = BagTrinkets()
 	for _, fb in ipairs(flyButtons) do fb:Hide() end
 	if #list == 0 then
@@ -186,6 +244,7 @@ local function ShowFlyout(anchor)
 	else flyout:SetPoint("TOP", anchor, "BOTTOM", 0, -GAP) end
 	flyout.anchor = anchor
 	flyout:Show()
+	UpdateQueue()
 end
 
 ---------------------------------------------------------------------------
@@ -200,9 +259,8 @@ local function Create()
 	flyout = CreateFrame("Frame", nil, UIParent)
 	flyout:SetFrameStrata("DIALOG")
 	flyout:Hide()
-	-- Closes when the mouse leaves both the flyout and its button, and when combat starts.
+	-- Closes when the mouse leaves both the flyout and its button. It stays usable in combat: clicks queue.
 	flyout:SetScript("OnUpdate", function(self)
-		if InCombatLockdown() then self:Hide() return end
 		if not (self:IsMouseOver(4, -4, -4, 4) or (self.anchor and self.anchor:IsMouseOver())) then self:Hide() end
 	end)
 
@@ -222,6 +280,18 @@ local function Create()
 		b:SetPushedTexture("Interface\\Buttons\\UI-Quickslot-Depress")
 		b.cd = CreateFrame("Cooldown", nil, b, "CooldownFrameTemplate")
 		b.cd:SetAllPoints()
+		local overlay = CreateFrame("Frame", nil, b)
+		overlay:SetAllPoints()
+		overlay:SetFrameLevel(b.cd:GetFrameLevel() + 2)
+		b.queuedBorder = overlay:CreateTexture(nil, "ARTWORK")
+		b.queuedBorder:SetColorTexture(1, 0.82, 0, 1)
+		b.queuedBorder:SetSize(18, 18)
+		b.queuedBorder:SetPoint("BOTTOMRIGHT", 2, -2)
+		b.queued = overlay:CreateTexture(nil, "OVERLAY")
+		b.queued:SetSize(16, 16)
+		b.queued:SetPoint("CENTER", b.queuedBorder, "CENTER")
+		b.queued:Hide()
+		b.queuedBorder:Hide()
 		b:RegisterForDrag("LeftButton")
 		b:SetScript("OnDragStart", function()
 			if db.locked or not IsShiftKeyDown() or InCombatLockdown() then return end
@@ -240,6 +310,8 @@ local function Create()
 				else
 					GameTooltip:SetText(self.slot == 13 and "Top trinket slot" or "Bottom trinket slot")
 				end
+				local q = queue[self.slot]
+				if q then GameTooltip:AddLine("Queued after combat: " .. q.link, 1, 0.82, 0) end
 				if not db.locked then GameTooltip:AddLine("Shift-drag to move", 0.31, 0.76, 0.97) end
 				GameTooltip:Show()
 			end
@@ -294,7 +366,7 @@ local function BuildSettings()
 	end, "Moves the dock back to the middle of the screen.")
 	reset:SetPoint("TOPLEFT", 210, -130)
 
-	w:Text(X, -232, "Click a button to use the trinket. Hover it out of combat for the flyout: left-click equips to the top slot, right-click to the bottom slot. Keybindings: Options > Keybindings > TrinketDock.", 368)
+	w:Text(X, -232, "Click a button to use the trinket. Hover it for the flyout: left-click equips to the top slot, right-click to the bottom slot. In combat the swap is queued and done when combat ends. Keybindings: Options > Keybindings > TrinketDock.", 368)
 end
 
 local function ToggleSettings()
@@ -360,6 +432,7 @@ events:SetScript("OnEvent", function(_, event, arg1)
 		if arg1 == 13 or arg1 == 14 then UpdateAll() end
 	elseif event == "PLAYER_REGEN_ENABLED" then
 		if pendingLayout then Layout() end
+		if next(queue) then RunQueue() end
 	else
 		UpdateAll()
 	end

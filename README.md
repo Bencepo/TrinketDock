@@ -5,7 +5,8 @@ A lightweight trinket menu for WoW Forever: two buttons for your trinkets, and a
 **Website:** https://bencepo.github.io/trinketdock/
 
 - **Two use buttons.** Your top and bottom trinket with their cooldowns. Click to use, or bind a key (Options > Keybindings > TrinketDock).
-- **Flyout to swap.** Hover a button out of combat: every trinket in your bags shows up. Left-click equips it to the top slot, right-click to the bottom slot.
+- **Flyout to swap.** Hover a button: every trinket in your bags shows up. Left-click equips it to the top slot, right-click to the bottom slot.
+- **Queue in combat.** Trinkets cannot be swapped in combat, so the flyout queues the swap instead: it happens the moment combat ends. A small icon on the button shows what is queued.
 - **Lightweight.** Bags are read only when the flyout opens. The only events are trinket equipment changes and item cooldowns. Made as a slim replacement for the trinket menu of ItemRack, which rebuilds its menus every time combat starts and ends.
 - **Your layout.** Side by side or stacked, flyout upwards or downwards, any scale. Shift-drag a button to move the dock, or lock it.
 - **Settings window of its own** (`/tdock` or the addon menu at the minimap): drag it anywhere, changes apply live.
