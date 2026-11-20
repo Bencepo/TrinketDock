@@ -18,6 +18,7 @@ Ben used ItemRack only for its trinket menu. SpikeSpotter showed ItemRack costin
 - No background work. Bags are read only in `ShowFlyout`. Events: `PLAYER_EQUIPMENT_CHANGED` (13/14 only), `BAG_UPDATE_COOLDOWN`, `PLAYER_ENTERING_WORLD`, `PLAYER_REGEN_ENABLED` (only applies a layout change deferred from combat).
 - Secure buttons: never move, scale, show or hide the dock in combat; `Layout()` defers itself to `PLAYER_REGEN_ENABLED`.
 - Swapping uses `C_Container.PickupContainerItem` + `PickupInventoryItem`, out of combat only.
+- Use buttons are `type = "macro"` with `/use 13` / `/use 14`: `type = "item"` with the slot number did nothing in combat on Forever. Clicks registered `AnyUp` + `AnyDown` (keybindings send down). `/tdock debug` prints every click to chat.
 - UI texts in English. Settings in the BencepoUI window, not in Blizzard's options.
 - CI runs luacheck and LuaLS with the WoW API annotations; LuaLS must report zero diagnostics or the release stops. New Blizzard globals go into `.luarc.json`.
 - Release: new version heading at the top of `CHANGELOG.md` (`## 1.0.1`), push to `main`; the workflow tags, builds and uploads to CurseForge and Wago (secrets `CF_API_KEY`, `WAGO_API_TOKEN`). The release reaches players right away, so test changes in the game before pushing.

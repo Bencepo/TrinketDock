@@ -213,8 +213,9 @@ local function Create()
 		-- Up and down, like the action bars: the template acts on one of them (ActionButtonUseKeyDown),
 		-- and keybindings send the down click.
 		b:RegisterForClicks("AnyUp", "AnyDown")
-		b:SetAttribute("type", "item")
-		b:SetAttribute("item", slot)
+		-- The same as a player macro "/use 13": works in combat exactly like one.
+		b:SetAttribute("type", "macro")
+		b:SetAttribute("macrotext", "/use " .. slot)
 		b.icon = b:CreateTexture(nil, "ARTWORK")
 		b.icon:SetAllPoints()
 		b:SetHighlightTexture("Interface\\Buttons\\ButtonHilight-Square", "ADD")
@@ -245,6 +246,12 @@ local function Create()
 			ShowFlyout(self)
 		end)
 		b:SetScript("OnLeave", function() GameTooltip:Hide() end)
+		b:SetScript("PostClick", function(self, mouse, down)
+			if ns.debug then
+				print(PREFIX .. ("click %s %s, combat %s, slot %d"):format(tostring(mouse), down and "down" or "up",
+					InCombatLockdown() and "yes" or "no", self.slot))
+			end
+		end)
 		buttons[i] = b
 	end
 	Layout()
@@ -316,7 +323,14 @@ end
 
 SLASH_TRINKETDOCK1 = "/tdock"
 SLASH_TRINKETDOCK2 = "/trinketdock"
-SlashCmdList.TRINKETDOCK = ToggleSettings
+SlashCmdList.TRINKETDOCK = function(msg)
+	if (msg or ""):lower():match("^%s*debug") then
+		ns.debug = not ns.debug
+		print(PREFIX .. "click debug " .. (ns.debug and "on" or "off") .. ".")
+		return
+	end
+	ToggleSettings()
+end
 
 ---------------------------------------------------------------------------
 -- Events
