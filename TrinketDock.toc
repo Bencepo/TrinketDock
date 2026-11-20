@@ -1,0 +1,14 @@
+## Interface: 16001
+## Title: TrinketDock
+## Notes: Lightweight trinket menu: two use buttons for your trinkets, hover for a flyout to swap. No scanning in the background.
+## Author: Bencepo
+## Version: @project-version@
+## X-Website: https://bencepo.github.io/trinketdock/
+## X-License: All Rights Reserved
+## SavedVariables: TrinketDockDB
+## IconTexture: Interface\Icons\INV_Jewelry_Talisman_07
+## AddonCompartmentFunc: TrinketDock_OnCompartmentClick
+
+Libs\LibStub\LibStub.lua
+Libs\BencepoUI\BencepoUI.lua
+TrinketDock.lua

@@ -1,0 +1,84 @@
+name: Lint
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_call:
+
+jobs:
+  luacheck:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v5
+
+      # luacheck kommt als Docker-Image statt per apt (die apt-Installation hing bzw. brach mit Exit 100 ab).
+      - name: Install luacheck
+        timeout-minutes: 5
+        run: docker pull -q ghcr.io/lunarmodules/luacheck:v1.2.0
+
+      # Syntaxfehler (Exit-Code 2 und höher) stoppen den Lauf, Warnungen (1) nur anzeigen.
+      # Jede Meldung wird als Annotation ausgegeben (Datei, Zeile, Code).
+      - name: Run luacheck
+        run: |
+          set +e
+          luacheck() { docker run --rm -v "$PWD:/data" -w /data --entrypoint luacheck ghcr.io/lunarmodules/luacheck:v1.2.0 "$@"; }
+          luacheck TrinketDock.lua --formatter plain --codes > luacheck.txt
+          code=$?
+          cat luacheck.txt
+          while IFS= read -r line; do
+            file=$(echo "$line" | cut -d: -f1); ln=$(echo "$line" | cut -d: -f2); col=$(echo "$line" | cut -d: -f3)
+            msg=$(echo "$line" | cut -d: -f4- | sed 's/^ *//')
+            case "$msg" in
+              \(E*) echo "::error file=$file,line=$ln,col=$col::$msg" ;;
+              *) echo "::warning file=$file,line=$ln,col=$col::$msg" ;;
+            esac
+          done < luacheck.txt
+          luacheck TrinketDock.lua --formatter default --no-color | tail -1 > summary.txt
+          echo "::notice title=luacheck::$(cat summary.txt) (exit $code)"
+          if [ $code -ge 2 ]; then exit $code; fi
+          exit 0
+
+  # The audit WoW addon sites run: LuaLS with Ketho's WoW API annotations (vscode-wow-api).
+  # Settings and the Classic-only globals the annotations do not know come from .luarc.json.
+  # Any diagnostic fails the job.
+  luals:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Install LuaLS and the WoW API annotations
+        timeout-minutes: 5
+        run: |
+          v=3.19.2
+          mkdir -p "$RUNNER_TEMP/luals"
+          curl -fsSL "https://github.com/LuaLS/lua-language-server/releases/download/$v/lua-language-server-$v-linux-x64.tar.gz" | tar -xz -C "$RUNNER_TEMP/luals"
+          git clone -q --depth 1 https://github.com/Ketho/vscode-wow-api "$RUNNER_TEMP/wow-api"
+
+      - name: Run LuaLS
+        run: |
+          python3 - <<'PY'
+          import json, os
+          t = os.environ["RUNNER_TEMP"]
+          cfg = {k: v for k, v in json.load(open(".luarc.json")).items() if not k.startswith("$")}
+          cfg["workspace.library"] = [t + "/wow-api/Annotations/Core"]
+          cfg["runtime.builtin"] = {k: "disable" for k in ["basic", "debug", "io", "math", "os", "package", "string", "table", "utf8"]}
+          json.dump(cfg, open(t + "/luarc.json", "w"))
+          PY
+          "$RUNNER_TEMP/luals/bin/lua-language-server" --check="$PWD" --configpath="$RUNNER_TEMP/luarc.json" \
+            --checklevel=Hint --check_out_path="$RUNNER_TEMP/luals.json" --logpath="$RUNNER_TEMP/log"
+          python3 - <<'PY'
+          import json, os, sys
+          p = os.environ["RUNNER_TEMP"] + "/luals.json"
+          d = json.load(open(p)) if os.path.exists(p) else {}
+          n = 0
+          for uri, diags in (d.items() if isinstance(d, dict) else []):
+              f = os.path.relpath(uri.replace("file://", ""))
+              for x in diags:
+                  n += 1
+                  ln = x["range"]["start"]["line"] + 1
+                  msg = x["message"].replace("\n", " ")
+                  print(f"::warning file={f},line={ln}::{x['code']}: {msg}")
+          print(f"::notice title=LuaLS::{n} diagnostics")
+          sys.exit(1 if n else 0)
+          PY

@@ -1,0 +1,54 @@
+name: Bug report
+description: Something in TrinketDock does not work as expected
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for taking the time. Short reports are fine, an error text helps the most.
+        No GitHub account? Leave a comment on [CurseForge](https://www.curseforge.com/wow/addons/trinketdock#comments) instead.
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened?
+      description: What did you do, what did you expect, what happened instead?
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      placeholder: |
+        1. Hover the top trinket button
+        2. Left-click a trinket in the flyout
+        3. ...
+  - type: textarea
+    id: error
+    attributes:
+      label: Lua error text
+      description: Copy it from BugSack/BugGrabber, or turn errors on with `/console scriptErrors 1` and reproduce.
+      render: text
+  - type: input
+    id: version
+    attributes:
+      label: TrinketDock version
+      description: Shown in the addon list or on the CurseForge file page.
+      placeholder: e.g. 1.2.0
+    validations:
+      required: true
+  - type: input
+    id: character
+    attributes:
+      label: Class, level and realm type
+      placeholder: e.g. Druid 34, PvE
+  - type: textarea
+    id: diagnosis
+    attributes:
+      label: Diagnosis text
+      description: For a wrong entry in the list or a failed purchase, Alt+click the row and paste the text from the window.
+      render: text
+  - type: textarea
+    id: addons
+    attributes:
+      label: Other addons
+      description: Especially equipment and action bar addons (ItemRack, Outfitter ...). Does the bug still happen with only TrinketDock enabled?

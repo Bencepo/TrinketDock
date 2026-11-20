@@ -1,0 +1,20 @@
+{
+  "$schema": "https://raw.githubusercontent.com/LuaLS/vscode-lua/master/setting/schema.json",
+  "runtime.version": "Lua 5.1",
+  "workspace.ignoreDir": [
+    "Libs",
+    ".release",
+    "tests",
+    "web",
+    ".github"
+  ],
+  "diagnostics.globals": [
+    "BINDING_HEADER_TRINKETDOCK",
+    "CreateSettingsButtonInitializer",
+    "Settings",
+    "SettingsPanel",
+    "SlashCmdList",
+    "UISpecialFrames",
+    "issecretvalue"
+  ]
+}

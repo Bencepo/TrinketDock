@@ -1,0 +1,118 @@
+name: Release
+
+# Releases come from the changelog: when a push to main brings a new version as the
+# top heading of CHANGELOG.md ("## 0.2.0-beta"), this workflow checks the code,
+# creates the tag v<version>, builds the zip and uploads it to CurseForge.
+# A tag pushed by hand (v*) releases as well.
+# Release type follows the version: "-beta" -> beta, "-alpha" -> alpha, otherwise release.
+on:
+  push:
+    branches: [main]
+    tags: ["v*"]
+  workflow_dispatch:
+
+jobs:
+  version:
+    runs-on: ubuntu-latest
+    outputs:
+      tag: ${{ steps.v.outputs.tag }}
+      release: ${{ steps.v.outputs.release }}
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+
+      - id: v
+        run: |
+          if [ -z "$CF_API_KEY" ]; then
+            echo "::notice title=release::CF_API_KEY secret is not set yet, nothing is released."
+            echo "release=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          if [ "${GITHUB_REF_TYPE}" = "tag" ]; then
+            echo "tag=${GITHUB_REF_NAME}" >> "$GITHUB_OUTPUT"
+            echo "release=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          version=$(grep -m1 -E '^## +[0-9]' CHANGELOG.md | sed -E 's/^## +//; s/ .*$//')
+          if [ -z "$version" ]; then
+            echo "No version heading in CHANGELOG.md"
+            echo "release=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          tag="v${version}"
+          echo "tag=${tag}" >> "$GITHUB_OUTPUT"
+          # Released means: a GitHub release exists for the tag. A tag without a release
+          # (an earlier run that failed) is released again.
+          if gh release view "${tag}" >/dev/null 2>&1; then
+            echo "${tag} already released"
+            echo "release=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "New version ${tag}"
+            echo "release=true" >> "$GITHUB_OUTPUT"
+          fi
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          CF_API_KEY: ${{ secrets.CF_API_KEY }}
+
+  lint:
+    needs: version
+    if: needs.version.outputs.release == 'true'
+    uses: ./.github/workflows/lint.yml
+
+  release:
+    needs: [version, lint]
+    if: needs.version.outputs.release == 'true'
+    runs-on: ubuntu-latest
+    env:
+      CF_API_KEY: ${{ secrets.CF_API_KEY }}
+      WAGO_API_TOKEN: ${{ secrets.WAGO_API_TOKEN }}
+      GITHUB_OAUTH: ${{ secrets.GITHUB_TOKEN }}
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+
+      # Tag the release commit. A tag pushed with GITHUB_TOKEN does not start this workflow again.
+      - name: Create tag
+        if: github.ref_type == 'branch'
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          tag="${{ needs.version.outputs.tag }}"
+          if git rev-parse -q --verify "refs/tags/${tag}" >/dev/null; then
+            git checkout -q "${tag}"
+          else
+            git tag -a "${tag}" -m "TrinketDock ${tag}"
+            git push origin "${tag}"
+          fi
+
+      # The packager's output is passed back as an annotation, and the run fails when
+      # nothing was uploaded to CurseForge, so a silent skip cannot go unnoticed.
+      # The packager decides by GITHUB_REF: on a branch push it skips a tagged commit
+      # ("future tag") and waits for a tag run that GITHUB_TOKEN tags never start.
+      - name: Package and upload
+        run: |
+          export GITHUB_REF="refs/tags/${{ needs.version.outputs.tag }}"
+          export GITHUB_REF_NAME="${{ needs.version.outputs.tag }}"
+          export GITHUB_REF_TYPE=tag
+          curl -sSfL https://raw.githubusercontent.com/BigWigsMods/packager/v2/release.sh -o "$RUNNER_TEMP/release.sh"
+          if [ -z "$CF_API_KEY" ]; then echo "::warning title=packager::CF_API_KEY is empty: the secret is missing or misnamed"; fi
+          set +e
+          bash "$RUNNER_TEMP/release.sh" 2>&1 | tee "$RUNNER_TEMP/pkg.log"
+          code=${PIPESTATUS[0]}
+          set -e
+          log=$(tail -n 60 "$RUNNER_TEMP/pkg.log" | sed 's/%/%25/g' | sed 's/\r//g' | awk '{printf "%s%%0A", $0}')
+          echo "::notice title=packager (exit $code)::$log"
+          if [ $code -ne 0 ]; then exit $code; fi
+          if ! grep -A1 -iE "^Uploading .* to https://[a-z.]*curseforge\.com" "$RUNNER_TEMP/pkg.log" | grep -q "Success!"; then
+            echo "::error title=packager::No CurseForge upload in the log"
+            exit 1
+          fi
+          if [ -z "$WAGO_API_TOKEN" ]; then
+            echo "::warning title=packager::WAGO_API_TOKEN is not set, nothing was uploaded to Wago"
+          elif ! grep -A1 -iE "^Uploading .* to https://addons\.wago\.io" "$RUNNER_TEMP/pkg.log" | grep -q "Success!"; then
+            echo "::warning title=packager::No Wago upload found in the log, check the packager output"
+          fi

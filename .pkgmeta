@@ -1,0 +1,13 @@
+package-as: TrinketDock
+
+ignore:
+  - .github
+  - .pkgmeta
+  - "*.md"
+  - .luacheckrc
+  - .luarc.json
+  - media
+
+manual-changelog:
+  filename: CHANGELOG.md
+  markup-type: markdown
