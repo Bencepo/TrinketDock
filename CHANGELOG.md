@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.1.1
+
+- The shared settings window (BencepoUI) is now one version for all Bencepo addons: "Report a bug" sits in a footer of its own, and the hint in the title row no longer runs into the title.
+
 ## 1.1.0
 
 - Frame and background for the dock, each on or off, with a colour of your choice (window: Look). The background also has its own opacity.
