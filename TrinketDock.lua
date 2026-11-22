@@ -36,6 +36,7 @@ local dock, flyout, settingsWin
 local buttons, flyButtons = {}, {}
 local queue = {}                -- [13|14] = { link, icon }: swap waiting for the end of combat
 local pendingLayout = false
+local editMode = false          -- the game's Edit Mode is open: the dock shows and moves there
 
 BINDING_HEADER_TRINKETDOCK = "TrinketDock"
 _G["BINDING_NAME_CLICK TrinketDockButton1:LeftButton"] = "Use top trinket"
@@ -174,7 +175,7 @@ local function Layout()
 	dock:ClearAllPoints()
 	local p = db.point
 	if p then dock:SetPoint(p[1], UIParent, p[2], p[3], p[4]) else dock:SetPoint("CENTER", UIParent, "CENTER", 0, -200) end
-	dock:SetShown(not db.hidden)
+	dock:SetShown(not db.hidden or editMode)
 end
 
 -- Frame, background and opacity. None of it is protected, so it also applies in combat.
@@ -291,6 +292,119 @@ local function ShowFlyout(anchor)
 end
 
 ---------------------------------------------------------------------------
+-- Edit Mode: the dock shows there (blue, named, even when hidden) and moves like the game's
+-- frames. With Edit Mode's "Snap" on it snaps flush to the other Edit Mode frames, the screen
+-- edges and the screen centre lines. Edit Mode is never open in combat.
+---------------------------------------------------------------------------
+
+local mover
+
+local function SnapOn()
+	local m = EditModeManagerFrame
+	if not (m and m.IsSnapEnabled) then return false end
+	local ok, on = pcall(m.IsSnapEnabled, m)
+	return ok and on and true or false
+end
+
+-- Rectangle of a frame in the dock's coordinates: left, right, bottom, top.
+local function RectIn(frame)
+	local ok, l, r, b, t = pcall(function()
+		if not (frame and frame:IsVisible()) then return nil end
+		local l, r, b, t = frame:GetLeft(), frame:GetRight(), frame:GetBottom(), frame:GetTop()
+		if not (l and r and b and t) then return nil end
+		local k = frame:GetEffectiveScale() / dock:GetEffectiveScale()
+		return l * k, r * k, b * k, t * k
+	end)
+	if ok and l then return l, r, b, t end
+	return nil
+end
+
+local SNAP_RANGE = 12 -- screen pixels within which an edge snaps
+local function SnapOffset(edges, targets, range)
+	local best
+	for _, e in ipairs(edges) do
+		for _, tv in ipairs(targets) do
+			local d = tv - e
+			if math.abs(d) <= range and (not best or math.abs(d) < math.abs(best)) then best = d end
+		end
+	end
+	return best or 0
+end
+
+local function SnapToElements(l, r, b, t)
+	local k = UIParent:GetEffectiveScale() / dock:GetEffectiveScale()
+	local range = SNAP_RANGE * k
+	local W, H = UIParent:GetWidth() * k, UIParent:GetHeight() * k
+	local xs, ys = { 0, W / 2, W }, { 0, H / 2, H }
+	local frames = EditModeManagerFrame and EditModeManagerFrame.registeredSystemFrames
+	for _, other in ipairs(type(frames) == "table" and frames or {}) do
+		local fl, fr, fb, ft = RectIn(other)
+		if fl then
+			-- a frame counts for one axis only when it is near on the other one
+			if fb - range <= t and b <= ft + range then xs[#xs + 1], xs[#xs + 2], xs[#xs + 3] = fl, fr, (fl + fr) / 2 end
+			if fl - range <= r and l <= fr + range then ys[#ys + 1], ys[#ys + 2], ys[#ys + 3] = fb, ft, (fb + ft) / 2 end
+		end
+	end
+	return SnapOffset({ l, r, (l + r) / 2 }, xs, range), SnapOffset({ b, t, (b + t) / 2 }, ys, range)
+end
+
+-- After a drag in Edit Mode: snapped (with Snap on), anchored by its top left, saved.
+local function PlaceAfterDrag()
+	local l, r, b, t = dock:GetLeft(), dock:GetRight(), dock:GetBottom(), dock:GetTop()
+	if not (l and r and b and t) then return end
+	local dx, dy = 0, 0
+	if SnapOn() then
+		local ok, x, y = pcall(SnapToElements, l, r, b, t)
+		if ok then dx, dy = x, y end
+	end
+	dock:ClearAllPoints()
+	dock:SetPoint("TOPLEFT", UIParent, "BOTTOMLEFT", l + dx, t + dy)
+	SavePosition()
+end
+
+local function SetEditMode(on)
+	if not dock or InCombatLockdown() then return end
+	editMode = on
+	if not mover then
+		-- above the buttons, so the drag goes to the dock and not to a trinket
+		mover = CreateFrame("Frame", nil, dock, "BackdropTemplate")
+		mover:SetPoint("TOPLEFT", -4, 4)
+		mover:SetPoint("BOTTOMRIGHT", 4, -4)
+		mover:SetFrameLevel(dock:GetFrameLevel() + 20)
+		mover:SetBackdrop({ bgFile = WHITE, edgeFile = WHITE, edgeSize = 1 })
+		mover:SetBackdropColor(0.25, 0.55, 1, 0.35)
+		mover:SetBackdropBorderColor(0.35, 0.65, 1, 1)
+		mover:EnableMouse(true)
+		mover:RegisterForDrag("LeftButton")
+		mover:SetScript("OnDragStart", function() HideFlyout() dock:StartMoving() end)
+		mover:SetScript("OnDragStop", function()
+			dock:StopMovingOrSizing()
+			PlaceAfterDrag()
+		end)
+		local label = mover:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+		label:SetPoint("BOTTOM", mover, "TOP", 0, 4)
+		label:SetText("TrinketDock")
+	end
+	mover:SetShown(on)
+	if on then
+		HideFlyout()
+		dock:Show() -- also when hidden: it has to be placed somewhere
+	else
+		Layout() -- back to shown or hidden as set
+	end
+end
+
+local function HookEditMode()
+	if EventRegistry and EventRegistry.RegisterCallback then
+		EventRegistry:RegisterCallback("EditMode.Enter", function() SetEditMode(true) end, dock)
+		EventRegistry:RegisterCallback("EditMode.Exit", function() SetEditMode(false) end, dock)
+	elseif EditModeManagerFrame and hooksecurefunc then
+		hooksecurefunc(EditModeManagerFrame, "EnterEditMode", function() SetEditMode(true) end)
+		hooksecurefunc(EditModeManagerFrame, "ExitEditMode", function() SetEditMode(false) end)
+	end
+end
+
+---------------------------------------------------------------------------
 -- Frames
 ---------------------------------------------------------------------------
 
@@ -364,7 +478,7 @@ local function Create()
 				if not db.locked then GameTooltip:AddLine("Shift-drag to move", 0.31, 0.76, 0.97) end
 				GameTooltip:Show()
 			end
-			ShowFlyout(self)
+			if not editMode then ShowFlyout(self) end
 		end)
 		b:SetScript("OnLeave", function() GameTooltip:Hide() end)
 		b:SetScript("PostClick", function(self, mouse, down)
@@ -396,7 +510,7 @@ local function BuildSettings()
 	w:Header(X, -48, "Buttons")
 	w:Check(X, -72, "Show the buttons", "Hides or shows both trinket buttons.",
 		function() return not db.hidden end, function(v) db.hidden = not v Layout() end)
-	w:Check(X, -96, "Lock position", "When unlocked, Shift-drag a button to move the dock.",
+	w:Check(X, -96, "Lock position", "When unlocked, Shift-drag a button to move the dock. The game's Edit Mode always moves it.",
 		function() return db.locked end, function(v) db.locked = v and true or false end)
 	w:Check(X, -120, "Vertical", "Stacks the two buttons instead of placing them side by side.",
 		function() return db.vertical end, function(v) db.vertical = v and true or false Layout() end)
@@ -413,7 +527,7 @@ local function BuildSettings()
 	local reset = w:Button("Reset position", 170, function()
 		db.point = nil
 		Layout()
-	end, "Moves the dock back to the middle of the screen.")
+	end, "Moves the dock back to the middle of the screen. The game's Edit Mode moves it too, with snapping.")
 	reset:SetPoint("TOPLEFT", 210, -130)
 
 	w:Header(210, -172, "Look")
@@ -505,6 +619,7 @@ events:SetScript("OnEvent", function(_, event, arg1)
 		db.up = nil
 		Create()
 		pcall(RegisterSettings)
+		pcall(HookEditMode)
 		events:RegisterEvent("PLAYER_EQUIPMENT_CHANGED")
 		events:RegisterEvent("BAG_UPDATE_COOLDOWN")
 		events:RegisterEvent("PLAYER_ENTERING_WORLD")

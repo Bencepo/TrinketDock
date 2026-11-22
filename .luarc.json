@@ -13,10 +13,12 @@
     "ColorPickerFrame",
     "CopyTable",
     "CreateSettingsButtonInitializer",
+    "EditModeManagerFrame",
+    "EventRegistry",
+    "issecretvalue",
     "Settings",
     "SettingsPanel",
     "SlashCmdList",
-    "UISpecialFrames",
-    "issecretvalue"
+    "UISpecialFrames"
   ]
 }

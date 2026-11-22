@@ -17,6 +17,7 @@ Ben used ItemRack only for its trinket menu. SpikeSpotter showed ItemRack costin
 
 - No background work. Bags are read only in `ShowFlyout`. Events: `PLAYER_EQUIPMENT_CHANGED` (13/14 only), `BAG_UPDATE_COOLDOWN`, `PLAYER_ENTERING_WORLD`, `PLAYER_REGEN_ENABLED` (only applies a layout change deferred from combat).
 - Secure buttons: never move, scale, show or hide the dock in combat; `Layout()` defers itself to `PLAYER_REGEN_ENABLED`.
+- Edit Mode (hooked via `EventRegistry` "EditMode.Enter/Exit"): a mover frame above the buttons takes the drag; with Edit Mode's Snap on the dock snaps to `EditModeManagerFrame.registeredSystemFrames`, the screen edges and centre lines. Edit Mode is never open in combat.
 - Swapping uses `C_Container.PickupContainerItem` + `PickupInventoryItem`, out of combat only. In combat the flyout (insecure frames) still opens and `Equip` fills `queue[13|14]` = { link, icon }; `RunQueue` on `PLAYER_REGEN_ENABLED` finds the item by link and swaps. Ben wants this: queue in combat, swap right after.
 - Use buttons are `type = "macro"` with `/use 13` / `/use 14`: `type = "item"` with the slot number did nothing in combat on Forever. Clicks registered `AnyUp` + `AnyDown` (keybindings send down). `/tdock debug` prints every click to chat.
 - English only: UI texts and descriptions, no translations, no `Notes-xxXX` in the .toc. Settings in the BencepoUI window, not in Blizzard's options.
