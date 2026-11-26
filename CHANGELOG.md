@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+- Fixed: clicking a trinket in combat with slight mouse movement no longer triggers `ADDON_ACTION_BLOCKED` in `OnDragStop`; exiting Edit Mode as combat begins no longer leaves the Edit Mode mover blocking the trinket buttons; queued post-combat swaps now wait if you are dead or casting instead of being lost, and out-of-combat swaps verify the bag slot first.
+- Lower memory and event overhead: bag scans read item IDs and links directly without allocating `ContainerItemInfo` tables for every slot, `BAG_UPDATE_COOLDOWN` only refreshes cooldowns, and `PLAYER_EQUIPMENT_CHANGED` updates only the changed slot.
+- Shared settings window updated to BencepoUI 5.
+
 ## 1.2.0
 
 - The dock can be placed in the game's Edit Mode: it shows there (blue, with its name) even when hidden or locked. With Edit Mode's "Snap" on it snaps flush to the other Edit Mode frames, the screen edges and the screen centre; without it, it stays where you drop it. Shift-drag still works as before.

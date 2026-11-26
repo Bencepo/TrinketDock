@@ -32,11 +32,14 @@ local DEFAULTS = {
 }
 
 local db
-local dock, flyout, settingsWin
+local dock, flyout, settingsWin, events
 local buttons, flyButtons = {}, {}
 local queue = {}                -- [13|14] = { link, icon }: swap waiting for the end of combat
 local pendingLayout = false
 local editMode = false          -- the game's Edit Mode is open: the dock shows and moves there
+local dragging = false
+local moverDragging = false
+local queueDeferred = false
 
 BINDING_HEADER_TRINKETDOCK = "TrinketDock"
 _G["BINDING_NAME_CLICK TrinketDockButton1:LeftButton"] = "Use top trinket"
@@ -55,11 +58,20 @@ end
 
 local function BagTrinkets()
 	local list = {}
+	local getID = C_Container.GetContainerItemID
+	local getLink = C_Container.GetContainerItemLink
+	local getIcon = C_Item and C_Item.GetItemIconByID
 	for bag = 0, 4 do
 		for slot = 1, C_Container.GetContainerNumSlots(bag) or 0 do
-			local info = C_Container.GetContainerItemInfo(bag, slot)
-			if info and info.itemID and EquipLoc(info.itemID) == "INVTYPE_TRINKET" then
-				list[#list + 1] = { bag = bag, slot = slot, icon = info.iconFileID, link = info.hyperlink }
+			local itemID = getID(bag, slot)
+			if itemID and EquipLoc(itemID) == "INVTYPE_TRINKET" then
+				local link = getLink(bag, slot)
+				local icon = getIcon and getIcon(itemID)
+				if not icon then
+					local info = C_Container.GetContainerItemInfo(bag, slot)
+					icon = info and info.iconFileID
+				end
+				list[#list + 1] = { bag = bag, slot = slot, icon = icon, link = link }
 			end
 		end
 	end
@@ -67,10 +79,10 @@ local function BagTrinkets()
 end
 
 local function FindInBags(link)
+	local getLink = C_Container.GetContainerItemLink
 	for bag = 0, 4 do
 		for slot = 1, C_Container.GetContainerNumSlots(bag) or 0 do
-			local info = C_Container.GetContainerItemInfo(bag, slot)
-			if info and info.hyperlink == link then return bag, slot end
+			if getLink(bag, slot) == link then return bag, slot end
 		end
 	end
 end
@@ -83,6 +95,22 @@ local function SwapNow(bag, slot, invSlot)
 end
 
 local UpdateQueue -- defined with the dock
+
+local function SetQueueDeferEvents(on)
+	if queueDeferred == on or not events then return end
+	queueDeferred = on
+	if on then
+		events:RegisterUnitEvent("UNIT_SPELLCAST_STOP", "player")
+		events:RegisterUnitEvent("UNIT_SPELLCAST_CHANNEL_STOP", "player")
+		events:RegisterEvent("PLAYER_ALIVE")
+		events:RegisterEvent("PLAYER_UNGHOST")
+	else
+		events:UnregisterEvent("UNIT_SPELLCAST_STOP")
+		events:UnregisterEvent("UNIT_SPELLCAST_CHANNEL_STOP")
+		events:UnregisterEvent("PLAYER_ALIVE")
+		events:UnregisterEvent("PLAYER_UNGHOST")
+	end
+end
 
 -- In combat the swap is queued and done as soon as combat ends; the same click again cancels it.
 local function Equip(entry, invSlot)
@@ -98,10 +126,20 @@ local function Equip(entry, invSlot)
 		UpdateQueue()
 		return
 	end
-	SwapNow(entry.bag, entry.slot, invSlot)
+	local bag, slot = entry.bag, entry.slot
+	if C_Container.GetContainerItemLink(bag, slot) ~= entry.link then
+		bag, slot = FindInBags(entry.link)
+	end
+	if bag then SwapNow(bag, slot, invSlot) end
 end
 
 local function RunQueue()
+	if InCombatLockdown() or not next(queue) then return end
+	if UnitIsDeadOrGhost("player") or UnitCastingInfo("player") or UnitChannelInfo("player") then
+		SetQueueDeferEvents(true)
+		return
+	end
+	SetQueueDeferEvents(false)
 	for _, invSlot in ipairs(SLOTS) do
 		local q = queue[invSlot]
 		if q then
@@ -130,6 +168,12 @@ local function UpdateButton(b)
 	b.icon:SetTexture(tex or EMPTY_ICON)
 	b.icon:SetDesaturated(not tex)
 	SetCooldown(b.cd, GetInventoryItemCooldown("player", b.slot))
+end
+
+local function UpdateCooldowns()
+	for _, b in ipairs(buttons) do
+		SetCooldown(b.cd, GetInventoryItemCooldown("player", b.slot))
+	end
 end
 
 local function UpdateAll()
@@ -363,8 +407,16 @@ local function PlaceAfterDrag()
 end
 
 local function SetEditMode(on)
-	if not dock or InCombatLockdown() then return end
-	editMode = on
+	if not dock then return end
+	if not on then
+		editMode = false
+		moverDragging = false
+		if mover then mover:Hide() end
+		Layout() -- back to shown or hidden as set (defers safely if in combat)
+		return
+	end
+	if InCombatLockdown() then return end
+	editMode = true
 	if not mover then
 		-- above the buttons, so the drag goes to the dock and not to a trinket
 		mover = CreateFrame("Frame", nil, dock, "BackdropTemplate")
@@ -376,22 +428,27 @@ local function SetEditMode(on)
 		mover:SetBackdropBorderColor(0.35, 0.65, 1, 1)
 		mover:EnableMouse(true)
 		mover:RegisterForDrag("LeftButton")
-		mover:SetScript("OnDragStart", function() HideFlyout() dock:StartMoving() end)
+		mover:SetScript("OnDragStart", function()
+			if InCombatLockdown() then return end
+			moverDragging = true
+			HideFlyout()
+			dock:StartMoving()
+		end)
 		mover:SetScript("OnDragStop", function()
-			dock:StopMovingOrSizing()
-			PlaceAfterDrag()
+			if not moverDragging then return end
+			moverDragging = false
+			if not InCombatLockdown() then
+				dock:StopMovingOrSizing()
+				PlaceAfterDrag()
+			end
 		end)
 		local label = mover:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
 		label:SetPoint("BOTTOM", mover, "TOP", 0, 4)
 		label:SetText("TrinketDock")
 	end
-	mover:SetShown(on)
-	if on then
-		HideFlyout()
-		dock:Show() -- also when hidden: it has to be placed somewhere
-	else
-		Layout() -- back to shown or hidden as set
-	end
+	mover:Show()
+	HideFlyout()
+	dock:Show() -- also when hidden: it has to be placed somewhere
 end
 
 local function HookEditMode()
@@ -423,7 +480,12 @@ local function Create()
 	flyout:SetFrameStrata("DIALOG")
 	flyout:Hide()
 	-- Closes when the mouse leaves both the flyout and its button. It stays usable in combat: clicks queue.
-	flyout:SetScript("OnUpdate", function(self)
+	local flyElapsed = 0
+	flyout:SetScript("OnShow", function() flyElapsed = 0 end)
+	flyout:SetScript("OnUpdate", function(self, elapsed)
+		flyElapsed = flyElapsed + elapsed
+		if flyElapsed < 0.05 then return end
+		flyElapsed = 0
 		if not (self:IsMouseOver(4, -4, -4, 4) or (self.anchor and self.anchor:IsMouseOver())) then self:Hide() end
 	end)
 
@@ -458,12 +520,17 @@ local function Create()
 		b:RegisterForDrag("LeftButton")
 		b:SetScript("OnDragStart", function()
 			if db.locked or not IsShiftKeyDown() or InCombatLockdown() then return end
+			dragging = true
 			HideFlyout()
 			dock:StartMoving()
 		end)
 		b:SetScript("OnDragStop", function()
-			dock:StopMovingOrSizing()
-			SavePosition()
+			if not dragging then return end
+			dragging = false
+			if not InCombatLockdown() then
+				dock:StopMovingOrSizing()
+				SavePosition()
+			end
 		end)
 		b:SetScript("OnEnter", function(self)
 			if db.tooltips then
@@ -565,8 +632,8 @@ local function BuildSettings()
 end
 
 local function ToggleSettings()
+	if not db then return end
 	if not settingsWin then BuildSettings() end
-	settingsWin:Refresh()
 	settingsWin:Toggle()
 end
 
@@ -580,8 +647,8 @@ local function RegisterSettings()
 	if layout and CreateSettingsButtonInitializer then
 		layout:AddInitializer(CreateSettingsButtonInitializer("TrinketDock has its own settings window", "Open", function()
 			if SettingsPanel and SettingsPanel:IsShown() then HideUIPanel(SettingsPanel) end
+			if not db then return end
 			if not settingsWin then BuildSettings() end
-			settingsWin:Refresh()
 			settingsWin:Show()
 		end, "The window can be dragged anywhere and stays open while you play.", true))
 	end
@@ -603,10 +670,11 @@ end
 -- Events
 ---------------------------------------------------------------------------
 
-local events = CreateFrame("Frame")
+events = CreateFrame("Frame")
 events:RegisterEvent("PLAYER_LOGIN")
-events:SetScript("OnEvent", function(_, event, arg1)
+events:SetScript("OnEvent", function(self, event, arg1)
 	if event == "PLAYER_LOGIN" then
+		self:UnregisterEvent("PLAYER_LOGIN")
 		TrinketDockDB = TrinketDockDB or {}
 		db = TrinketDockDB
 		for k, v in pairs(DEFAULTS) do
@@ -620,15 +688,22 @@ events:SetScript("OnEvent", function(_, event, arg1)
 		Create()
 		pcall(RegisterSettings)
 		pcall(HookEditMode)
-		events:RegisterEvent("PLAYER_EQUIPMENT_CHANGED")
-		events:RegisterEvent("BAG_UPDATE_COOLDOWN")
-		events:RegisterEvent("PLAYER_ENTERING_WORLD")
-		events:RegisterEvent("PLAYER_REGEN_ENABLED")
+		self:RegisterEvent("PLAYER_EQUIPMENT_CHANGED")
+		self:RegisterEvent("BAG_UPDATE_COOLDOWN")
+		self:RegisterEvent("PLAYER_ENTERING_WORLD")
+		self:RegisterEvent("PLAYER_REGEN_ENABLED")
 	elseif event == "PLAYER_EQUIPMENT_CHANGED" then
-		if arg1 == 13 or arg1 == 14 then UpdateAll() end
+		if arg1 == 13 or arg1 == 14 then
+			local b = buttons[arg1 == 13 and 1 or 2]
+			if b then UpdateButton(b) end
+		end
+	elseif event == "BAG_UPDATE_COOLDOWN" then
+		UpdateCooldowns()
 	elseif event == "PLAYER_REGEN_ENABLED" then
 		if pendingLayout then Layout() end
 		if next(queue) then RunQueue() end
+	elseif event == "UNIT_SPELLCAST_STOP" or event == "UNIT_SPELLCAST_CHANNEL_STOP" or event == "PLAYER_ALIVE" or event == "PLAYER_UNGHOST" then
+		if next(queue) then RunQueue() else SetQueueDeferEvents(false) end
 	else
 		UpdateAll()
 	end
