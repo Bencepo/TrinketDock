@@ -7,6 +7,9 @@
 -- trinket equipment changes and item cooldowns. Nothing runs when combat starts or ends.
 
 local ADDON, ns = ...
+local pairs, ipairs, next, type, tonumber, pcall, wipe = pairs, ipairs, next, type, tonumber, pcall, wipe
+local abs = math.abs
+local format = format
 
 local VERSION = C_AddOns and C_AddOns.GetAddOnMetadata and C_AddOns.GetAddOnMetadata(ADDON, "Version") or ""
 if VERSION:find("@") then VERSION = "dev" end
@@ -56,8 +59,11 @@ local function EquipLoc(itemID)
 	return loc
 end
 
+local bagList, bagPool = {}, {}
+
 local function BagTrinkets()
-	local list = {}
+	wipe(bagList)
+	local n = 0
 	local getID = C_Container.GetContainerItemID
 	local getLink = C_Container.GetContainerItemLink
 	local getIcon = C_Item and C_Item.GetItemIconByID
@@ -71,11 +77,18 @@ local function BagTrinkets()
 					local info = C_Container.GetContainerItemInfo(bag, slot)
 					icon = info and info.iconFileID
 				end
-				list[#list + 1] = { bag = bag, slot = slot, icon = icon, link = link }
+				n = n + 1
+				local e = bagPool[n]
+				if not e then
+					e = {}
+					bagPool[n] = e
+				end
+				e.bag, e.slot, e.icon, e.link = bag, slot, icon, link
+				bagList[n] = e
 			end
 		end
 	end
-	return list
+	return bagList
 end
 
 local function FindInBags(link)
@@ -224,6 +237,7 @@ end
 
 -- Frame, background and opacity. None of it is protected, so it also applies in combat.
 local WHITE = "Interface\\Buttons\\WHITE8x8"
+local BACKDROP = { bgFile = WHITE, edgeFile = WHITE, edgeSize = 1 }
 local function ApplyLook()
 	if not dock then return end
 	local bg, c, f = dock.bg, db.bgColor, db.borderColor
@@ -319,10 +333,13 @@ local function ShowFlyout(anchor)
 		fb.entry = e
 		fb.icon:SetTexture(e.icon)
 		SetCooldown(fb.cd, C_Container.GetContainerItemCooldown(e.bag, e.slot))
-		fb:ClearAllPoints()
-		local y = (i - 1) * (SIZE + GAP)
-		if up then fb:SetPoint("BOTTOMLEFT", flyout, "BOTTOMLEFT", 0, y)
-		else fb:SetPoint("TOPLEFT", flyout, "TOPLEFT", 0, -y) end
+		if fb.up ~= up then
+			fb:ClearAllPoints()
+			local y = (i - 1) * (SIZE + GAP)
+			if up then fb:SetPoint("BOTTOMLEFT", flyout, "BOTTOMLEFT", 0, y)
+			else fb:SetPoint("TOPLEFT", flyout, "TOPLEFT", 0, -y) end
+			fb.up = up
+		end
 		fb:Show()
 	end
 	flyout:SetScale(db.scale)
@@ -351,45 +368,59 @@ local function SnapOn()
 end
 
 -- Rectangle of a frame in the dock's coordinates: left, right, bottom, top.
-local function RectIn(frame)
-	local ok, l, r, b, t = pcall(function()
-		if not (frame and frame:IsVisible()) then return nil end
-		local l, r, b, t = frame:GetLeft(), frame:GetRight(), frame:GetBottom(), frame:GetTop()
-		if not (l and r and b and t) then return nil end
-		local k = frame:GetEffectiveScale() / dock:GetEffectiveScale()
-		return l * k, r * k, b * k, t * k
-	end)
+local function readRect(frame, dockScale)
+	if not (frame and frame:IsVisible()) then return nil end
+	local l, r, b, t = frame:GetLeft(), frame:GetRight(), frame:GetBottom(), frame:GetTop()
+	if not (l and r and b and t) then return nil end
+	local k = frame:GetEffectiveScale() / dockScale
+	return l * k, r * k, b * k, t * k
+end
+
+local function RectIn(frame, dockScale)
+	local ok, l, r, b, t = pcall(readRect, frame, dockScale)
 	if ok and l then return l, r, b, t end
 	return nil
 end
 
 local SNAP_RANGE = 12 -- screen pixels within which an edge snaps
-local function SnapOffset(edges, targets, range)
-	local best
-	for _, e in ipairs(edges) do
+local snapXs, snapYs, snapEdges = {}, {}, {}
+
+local function SnapOffset(e1, e2, e3, targets, range)
+	snapEdges[1], snapEdges[2], snapEdges[3] = e1, e2, e3
+	local best, bestAbs
+	for i = 1, 3 do
+		local e = snapEdges[i]
 		for _, tv in ipairs(targets) do
 			local d = tv - e
-			if math.abs(d) <= range and (not best or math.abs(d) < math.abs(best)) then best = d end
+			local ad = abs(d)
+			if ad <= range and (not bestAbs or ad < bestAbs) then
+				best, bestAbs = d, ad
+			end
 		end
 	end
 	return best or 0
 end
 
 local function SnapToElements(l, r, b, t)
-	local k = UIParent:GetEffectiveScale() / dock:GetEffectiveScale()
+	local dockScale = dock:GetEffectiveScale()
+	local k = UIParent:GetEffectiveScale() / dockScale
 	local range = SNAP_RANGE * k
 	local W, H = UIParent:GetWidth() * k, UIParent:GetHeight() * k
-	local xs, ys = { 0, W / 2, W }, { 0, H / 2, H }
+	wipe(snapXs); wipe(snapYs)
+	snapXs[1], snapXs[2], snapXs[3] = 0, W / 2, W
+	snapYs[1], snapYs[2], snapYs[3] = 0, H / 2, H
 	local frames = EditModeManagerFrame and EditModeManagerFrame.registeredSystemFrames
-	for _, other in ipairs(type(frames) == "table" and frames or {}) do
-		local fl, fr, fb, ft = RectIn(other)
-		if fl then
-			-- a frame counts for one axis only when it is near on the other one
-			if fb - range <= t and b <= ft + range then xs[#xs + 1], xs[#xs + 2], xs[#xs + 3] = fl, fr, (fl + fr) / 2 end
-			if fl - range <= r and l <= fr + range then ys[#ys + 1], ys[#ys + 2], ys[#ys + 3] = fb, ft, (fb + ft) / 2 end
+	if type(frames) == "table" then
+		for _, other in ipairs(frames) do
+			local fl, fr, fb, ft = RectIn(other, dockScale)
+			if fl then
+				-- a frame counts for one axis only when it is near on the other one
+				if fb - range <= t and b <= ft + range then snapXs[#snapXs + 1], snapXs[#snapXs + 2], snapXs[#snapXs + 3] = fl, fr, (fl + fr) / 2 end
+				if fl - range <= r and l <= fr + range then snapYs[#snapYs + 1], snapYs[#snapYs + 2], snapYs[#snapYs + 3] = fb, ft, (fb + ft) / 2 end
+			end
 		end
 	end
-	return SnapOffset({ l, r, (l + r) / 2 }, xs, range), SnapOffset({ b, t, (b + t) / 2 }, ys, range)
+	return SnapOffset(l, r, (l + r) / 2, snapXs, range), SnapOffset(b, t, (b + t) / 2, snapYs, range)
 end
 
 -- After a drag in Edit Mode: snapped (with Snap on), anchored by its top left, saved.
@@ -423,7 +454,7 @@ local function SetEditMode(on)
 		mover:SetPoint("TOPLEFT", -4, 4)
 		mover:SetPoint("BOTTOMRIGHT", 4, -4)
 		mover:SetFrameLevel(dock:GetFrameLevel() + 20)
-		mover:SetBackdrop({ bgFile = WHITE, edgeFile = WHITE, edgeSize = 1 })
+		mover:SetBackdrop(BACKDROP)
 		mover:SetBackdropColor(0.25, 0.55, 1, 0.35)
 		mover:SetBackdropBorderColor(0.35, 0.65, 1, 1)
 		mover:EnableMouse(true)
@@ -474,7 +505,7 @@ local function Create()
 	dock.bg:SetPoint("TOPLEFT", -4, 4)
 	dock.bg:SetPoint("BOTTOMRIGHT", 4, -4)
 	dock.bg:SetFrameLevel(dock:GetFrameLevel())
-	dock.bg:SetBackdrop({ bgFile = WHITE, edgeFile = WHITE, edgeSize = 1 })
+	dock.bg:SetBackdrop(BACKDROP)
 
 	flyout = CreateFrame("Frame", nil, UIParent)
 	flyout:SetFrameStrata("DIALOG")
@@ -565,6 +596,8 @@ end
 -- Settings: a window of its own, live while you play
 ---------------------------------------------------------------------------
 
+local FLYOUT_DIRS = { { "UP", "Upwards" }, { "DOWN", "Downwards" } }
+
 local function BuildSettings()
 	local UI = LibStub("BencepoUI-1.0")
 	settingsWin = UI:CreateWindow({
@@ -585,10 +618,10 @@ local function BuildSettings()
 		function() return db.tooltips end, function(v) db.tooltips = v and true or false end)
 	w:Slider(X, -184, "Scale", 0.5, 2, 0.05, function() return db.scale end,
 		function(v) db.scale = v Layout() end, "Size of the buttons and the flyout.", 160,
-		function(v) return ("%.2f"):format(v) end)
+		function(v) return format("%.2f", v) end)
 
 	w:Header(210, -48, "Flyout")
-	w:Dropdown(210, -72, "Opens", 170, { { "UP", "Upwards" }, { "DOWN", "Downwards" } },
+	w:Dropdown(210, -72, "Opens", 170, FLYOUT_DIRS,
 		function() return db.direction end, function(v) db.direction = v end,
 		"Direction of the list of trinkets in your bags.")
 	local reset = w:Button("Reset position", 170, function()
@@ -626,15 +659,19 @@ local function BuildSettings()
 	resetLook:SetPoint("TOPLEFT", 210, -296)
 	w:Slider(210, -252, "Opacity", 0, 100, 5, function() return db.alpha end,
 		function(v) db.alpha = v ApplyLook() end, "Opacity of the whole dock. At 0% it is invisible but still clickable, and keybindings keep working.", 140,
-		function(v) return ("%d%%"):format(v) end)
+		function(v) return format("%d%%", v) end)
 
 	w:Text(X, -336, "Click a button to use the trinket. Hover it for the flyout: left-click equips to the top slot, right-click to the bottom slot. In combat the swap is queued and done when combat ends. Keybindings: Options > Keybindings > TrinketDock.", 368)
 end
 
+local function EnsureSettings()
+	if not settingsWin then BuildSettings() end
+	return settingsWin
+end
+
 local function ToggleSettings()
 	if not db then return end
-	if not settingsWin then BuildSettings() end
-	settingsWin:Toggle()
+	EnsureSettings():Toggle()
 end
 
 function TrinketDock_OnCompartmentClick()
@@ -648,8 +685,7 @@ local function RegisterSettings()
 		layout:AddInitializer(CreateSettingsButtonInitializer("TrinketDock has its own settings window", "Open", function()
 			if SettingsPanel and SettingsPanel:IsShown() then HideUIPanel(SettingsPanel) end
 			if not db then return end
-			if not settingsWin then BuildSettings() end
-			settingsWin:Show()
+			EnsureSettings():Show()
 		end, "The window can be dragged anywhere and stays open while you play.", true))
 	end
 	Settings.RegisterAddOnCategory(category)

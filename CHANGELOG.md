@@ -3,6 +3,7 @@
 ## Unreleased
 
 - Settings window: "More from Bencepo" button in the footer links to all Bencepo addons (BencepoUI 6).
+- Code cleanup, no change in behaviour.
 
 ## 1.2.1
 
