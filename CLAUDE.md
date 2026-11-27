@@ -6,7 +6,7 @@ TrinketDock: lightweight trinket menu for WoW Forever (Lua 5.1, modern C_Contain
 
 - `TrinketDock.lua`: everything (buttons, flyout, equipping, settings window, events).
 - `Bindings.xml`: keybindings as `CLICK TrinketDockButton1/2:LeftButton`.
-- `Libs/BencepoUI`: shared settings-window toolkit of all Bencepo addons; `opts.bugUrl` gives the "Report a bug" button. It must be the same file in each addon (canonical: minor 4, Nov 2026). Change it in one repo, bump the LibStub minor, copy it to the others: two different copies with the same minor make the result depend on load order.
+- `Libs/BencepoUI`: shared settings-window toolkit of all Bencepo addons; `opts.bugUrl` gives the "Report a bug" button. It must be the same file in each addon (canonical: minor 6, Nov 2026). Change it in one repo, bump the LibStub minor, copy it to the others: two different copies with the same minor make the result depend on load order.
 - `media/logo.png`: project logo for CurseForge, Wago and the website (not packaged).
 
 ## Why it exists

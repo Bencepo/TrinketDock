@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased
+
+- Settings window: "More from Bencepo" button in the footer links to all Bencepo addons (BencepoUI 6).
+
 ## 1.2.1
 
 - Fixed: clicking a trinket in combat with slight mouse movement no longer triggers `ADDON_ACTION_BLOCKED` in `OnDragStop`; exiting Edit Mode as combat begins no longer leaves the Edit Mode mover blocking the trinket buttons; queued post-combat swaps now wait if you are dead or casting instead of being lost, and out-of-combat swaps verify the bag slot first.
