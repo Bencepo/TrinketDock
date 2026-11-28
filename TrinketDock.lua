@@ -27,6 +27,7 @@ local DEFAULTS = {
 	direction = "UP",
 	tooltips = true,
 	hidden = false,
+	showMinimap = true,
 	border = false,     -- thin frame around the dock
 	background = false, -- dark background behind the dock
 	alpha = 100,        -- opacity of the whole dock in percent (0 = invisible, still clickable)
@@ -35,7 +36,7 @@ local DEFAULTS = {
 }
 
 local db
-local dock, flyout, settingsWin, events
+local dock, flyout, settingsWin, events, LDBIcon
 local buttons, flyButtons = {}, {}
 local queue = {}                -- [13|14] = { link, icon }: swap waiting for the end of combat
 local pendingLayout = false
@@ -663,6 +664,12 @@ end
 
 local FLYOUT_DIRS = { { "UP", "Upwards" }, { "DOWN", "Downwards" } }
 
+local function ApplyMinimap()
+	if not LDBIcon then return end
+	db.minimap.hide = not db.showMinimap
+	if db.showMinimap then LDBIcon:Show(ADDON) else LDBIcon:Hide(ADDON) end
+end
+
 local function BuildSettings()
 	local UI = LibStub("BencepoUI-1.0")
 	settingsWin = UI:CreateWindow({
@@ -684,6 +691,10 @@ local function BuildSettings()
 	w:Slider(X, -184, "Scale", 0.5, 2, 0.05, function() return db.scale end,
 		function(v) db.scale = v Layout() end, "Size of the buttons and the flyout.", 160,
 		function(v) return format("%.2f", v) end)
+
+	w:Header(X, -236, "General")
+	w:Check(X, -260, "Minimap button", "Show the TrinketDock button at the minimap.",
+		function() return db.showMinimap end, function(v) db.showMinimap = v and true or false ApplyMinimap() end)
 
 	w:Header(210, -48, "Flyout")
 	w:Dropdown(210, -72, "Opens", 170, FLYOUT_DIRS,
@@ -743,6 +754,26 @@ function TrinketDock_OnCompartmentClick()
 	ToggleSettings()
 end
 
+local function RegisterMinimap()
+	local LDB = LibStub("LibDataBroker-1.1", true)
+	LDBIcon = LibStub("LibDBIcon-1.0", true)
+	if not (LDB and LDBIcon) then return end
+	local obj = LDB:NewDataObject(ADDON, {
+		type = "launcher",
+		text = ADDON,
+		icon = "Interface\\AddOns\\TrinketDock\\Icons\\minimap",
+		OnClick = function(_, button)
+			if button == "LeftButton" then TrinketDock_OnCompartmentClick() end
+		end,
+		OnTooltipShow = function(tt)
+			tt:AddLine(ADDON)
+			tt:AddLine("|cffffffffLeft-click:|r settings", 0.8, 0.8, 0.8)
+		end,
+	})
+	db.minimap.hide = not db.showMinimap
+	LDBIcon:Register(ADDON, obj, db.minimap)
+end
+
 local function RegisterSettings()
 	if not (Settings and Settings.RegisterVerticalLayoutCategory and Settings.RegisterAddOnCategory) then return end
 	local category, layout = Settings.RegisterVerticalLayoutCategory("TrinketDock")
@@ -781,12 +812,14 @@ events:SetScript("OnEvent", function(self, event, arg1)
 		for k, v in pairs(DEFAULTS) do
 			if db[k] == nil then db[k] = type(v) == "table" and CopyTable(v) or v end
 		end
+		db.minimap = db.minimap or {}
 		-- 0.1.0 saved { point, "UIParent", relPoint, x, y }
 		if db.point and db.point[2] == "UIParent" then
 			db.point = { db.point[1], db.point[3], db.point[4], db.point[5] }
 		end
 		db.up = nil
 		Create()
+		RegisterMinimap()
 		pcall(RegisterSettings)
 		pcall(HookEditMode)
 		self:RegisterEvent("PLAYER_EQUIPMENT_CHANGED")
