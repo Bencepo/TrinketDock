@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 1.3.0
 
 - Trinket swaps while casting (a mount, for example) are queued like in combat and done as soon as the cast ends, so the cast is not cancelled.
 - Empty trinket slots are now hidden automatically: with one trinket equipped only that slot is shown, and with none equipped the dock hides (still visible in Edit Mode).
