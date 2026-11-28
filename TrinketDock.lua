@@ -108,6 +108,7 @@ local function SwapNow(bag, slot, invSlot)
 end
 
 local UpdateQueue -- defined with the dock
+local RunQueue
 
 local function SetQueueDeferEvents(on)
 	if queueDeferred == on or not events then return end
@@ -125,9 +126,16 @@ local function SetQueueDeferEvents(on)
 	end
 end
 
--- In combat the swap is queued and done as soon as combat ends; the same click again cancels it.
+-- Equipping now would cancel a cast in progress (a mount, for example), and in combat it is not
+-- allowed at all.
+local function MustQueue()
+	return InCombatLockdown() or UnitCastingInfo("player") or UnitChannelInfo("player")
+end
+
+-- In combat or while casting, the swap is queued and done as soon as combat or the cast ends;
+-- the same click again cancels it.
 local function Equip(entry, invSlot)
-	if InCombatLockdown() then
+	if MustQueue() then
 		local q = queue[invSlot]
 		if q and q.link == entry.link then
 			queue[invSlot] = nil
@@ -137,6 +145,8 @@ local function Equip(entry, invSlot)
 			if queue[other] and queue[other].link == entry.link then queue[other] = nil end
 		end
 		UpdateQueue()
+		-- out of combat, RunQueue waits for the cast to end (UNIT_SPELLCAST_STOP) and swaps then
+		if not InCombatLockdown() then RunQueue() end
 		return
 	end
 	local bag, slot = entry.bag, entry.slot
@@ -146,7 +156,7 @@ local function Equip(entry, invSlot)
 	if bag then SwapNow(bag, slot, invSlot) end
 end
 
-local function RunQueue()
+RunQueue = function()
 	if InCombatLockdown() or not next(queue) then return end
 	if UnitIsDeadOrGhost("player") or UnitCastingInfo("player") or UnitChannelInfo("player") then
 		SetQueueDeferEvents(true)
@@ -359,7 +369,11 @@ local function FlyButton(i)
 		local t = OpenTip(self)
 		t:SetBagItem(self.entry.bag, self.entry.slot)
 		t:AddLine("Left-click: top slot   Right-click: bottom slot", 0.31, 0.76, 0.97)
-		if InCombatLockdown() then t:AddLine("In combat: queued, swapped when combat ends", 1, 0.82, 0) end
+		if InCombatLockdown() then
+			t:AddLine("In combat: queued, swapped when combat ends", 1, 0.82, 0)
+		elseif MustQueue() then
+			t:AddLine("Casting: queued, swapped when the cast ends", 1, 0.82, 0)
+		end
 		t:Show()
 	end)
 	fb:SetScript("OnLeave", HideTip)
@@ -712,7 +726,7 @@ local function BuildSettings()
 		function(v) db.alpha = v ApplyLook() end, "Opacity of the whole dock. At 0% it is invisible but still clickable, and keybindings keep working.", 140,
 		function(v) return format("%d%%", v) end)
 
-	w:Text(X, -336, "Click a button to use the trinket. Hover it for the flyout: left-click equips to the top slot, right-click to the bottom slot. In combat the swap is queued and done when combat ends. Keybindings: Options > Keybindings > TrinketDock.", 368)
+	w:Text(X, -336, "Click a button to use the trinket. Hover it for the flyout: left-click equips to the top slot, right-click to the bottom slot. In combat or while casting, the swap is queued and done right after. Keybindings: Options > Keybindings > TrinketDock.", 368)
 end
 
 local function EnsureSettings()
