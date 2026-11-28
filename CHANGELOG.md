@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Tooltips on the dock and in the flyout now show only the hovered trinket, without equipped comparison tooltips.
 - Settings window: "More from Bencepo" button in the footer links to all Bencepo addons (BencepoUI 6).
 - Code cleanup, no change in behaviour.
 

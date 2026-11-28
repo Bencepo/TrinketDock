@@ -283,6 +283,24 @@ end
 -- Flyout
 ---------------------------------------------------------------------------
 
+-- Own tooltip without supportsItemComparison, so hovering a trinket never opens the
+-- equipped comparison tooltips (ShoppingTooltip1/2), even with Always Compare Items or Shift.
+---@type GameTooltip
+local dockTip
+local function OpenTip(owner)
+	if not dockTip then
+		dockTip = CreateFrame("GameTooltip", "TrinketDockTooltip", UIParent, "GameTooltipTemplate") --[[@as GameTooltip]]
+		dockTip:SetFrameStrata("TOOLTIP")
+		dockTip:SetClampedToScreen(true)
+	end
+	dockTip:SetOwner(owner, "ANCHOR_RIGHT")
+	return dockTip
+end
+
+local function HideTip()
+	if dockTip then dockTip:Hide() end
+end
+
 local function HideFlyout()
 	if flyout then flyout:Hide() end
 end
@@ -309,13 +327,13 @@ local function FlyButton(i)
 	end)
 	fb:SetScript("OnEnter", function(self)
 		if not (db.tooltips and self.entry) then return end
-		GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
-		GameTooltip:SetBagItem(self.entry.bag, self.entry.slot)
-		GameTooltip:AddLine("Left-click: top slot   Right-click: bottom slot", 0.31, 0.76, 0.97)
-		if InCombatLockdown() then GameTooltip:AddLine("In combat: queued, swapped when combat ends", 1, 0.82, 0) end
-		GameTooltip:Show()
+		local t = OpenTip(self)
+		t:SetBagItem(self.entry.bag, self.entry.slot)
+		t:AddLine("Left-click: top slot   Right-click: bottom slot", 0.31, 0.76, 0.97)
+		if InCombatLockdown() then t:AddLine("In combat: queued, swapped when combat ends", 1, 0.82, 0) end
+		t:Show()
 	end)
-	fb:SetScript("OnLeave", function() GameTooltip:Hide() end)
+	fb:SetScript("OnLeave", HideTip)
 	flyButtons[i] = fb
 	return fb
 end
@@ -513,6 +531,9 @@ local function Create()
 	-- Closes when the mouse leaves both the flyout and its button. It stays usable in combat: clicks queue.
 	local flyElapsed = 0
 	flyout:SetScript("OnShow", function() flyElapsed = 0 end)
+	flyout:SetScript("OnHide", function()
+		if dockTip and dockTip:GetOwner() and dockTip:GetOwner():GetParent() == flyout then dockTip:Hide() end
+	end)
 	flyout:SetScript("OnUpdate", function(self, elapsed)
 		flyElapsed = flyElapsed + elapsed
 		if flyElapsed < 0.05 then return end
@@ -552,6 +573,7 @@ local function Create()
 		b:SetScript("OnDragStart", function()
 			if db.locked or not IsShiftKeyDown() or InCombatLockdown() then return end
 			dragging = true
+			HideTip()
 			HideFlyout()
 			dock:StartMoving()
 		end)
@@ -565,20 +587,20 @@ local function Create()
 		end)
 		b:SetScript("OnEnter", function(self)
 			if db.tooltips then
-				GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
+				local t = OpenTip(self)
 				if GetInventoryItemTexture("player", self.slot) then
-					GameTooltip:SetInventoryItem("player", self.slot)
+					t:SetInventoryItem("player", self.slot)
 				else
-					GameTooltip:SetText(self.slot == 13 and "Top trinket slot" or "Bottom trinket slot")
+					t:SetText(self.slot == 13 and "Top trinket slot" or "Bottom trinket slot")
 				end
 				local q = queue[self.slot]
-				if q then GameTooltip:AddLine("Queued after combat: " .. q.link, 1, 0.82, 0) end
-				if not db.locked then GameTooltip:AddLine("Shift-drag to move", 0.31, 0.76, 0.97) end
-				GameTooltip:Show()
+				if q then t:AddLine("Queued after combat: " .. q.link, 1, 0.82, 0) end
+				if not db.locked then t:AddLine("Shift-drag to move", 0.31, 0.76, 0.97) end
+				t:Show()
 			end
 			if not editMode then ShowFlyout(self) end
 		end)
-		b:SetScript("OnLeave", function() GameTooltip:Hide() end)
+		b:SetScript("OnLeave", HideTip)
 		b:SetScript("PostClick", function(self, mouse, down)
 			if ns.debug then
 				print(PREFIX .. ("click %s %s, combat %s, slot %d"):format(tostring(mouse), down and "down" or "up",
