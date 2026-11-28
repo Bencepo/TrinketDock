@@ -176,11 +176,23 @@ end
 -- Dock
 ---------------------------------------------------------------------------
 
+local Layout, HideFlyout
+
+local function SlotEquipped(slot)
+	return GetInventoryItemID("player", slot) ~= nil or GetInventoryItemTexture("player", slot) ~= nil
+end
+
 local function UpdateButton(b)
-	local tex = GetInventoryItemTexture("player", b.slot)
+	local id = GetInventoryItemID("player", b.slot)
+	local tex = GetInventoryItemTexture("player", b.slot) or (id and C_Item and C_Item.GetItemIconByID and C_Item.GetItemIconByID(id))
+	local equipped = id ~= nil or tex ~= nil
 	b.icon:SetTexture(tex or EMPTY_ICON)
 	b.icon:SetDesaturated(not tex)
 	SetCooldown(b.cd, GetInventoryItemCooldown("player", b.slot))
+	if b.equipped ~= equipped then
+		b.equipped = equipped
+		Layout()
+	end
 end
 
 local function UpdateCooldowns()
@@ -210,7 +222,7 @@ function UpdateQueue()
 end
 
 -- Secure buttons cannot be moved, scaled or hidden in combat: the change waits for combat to end.
-local function Layout()
+Layout = function()
 	if not dock then return end
 	if InCombatLockdown() then
 		pendingLayout = true
@@ -218,21 +230,38 @@ local function Layout()
 	end
 	pendingLayout = false
 	dock:SetScale(db.scale)
-	for i, b in ipairs(buttons) do
+	local shown = 0
+	local prev
+	for _, b in ipairs(buttons) do
+		local eq = SlotEquipped(b.slot)
+		b.equipped = eq
+		local show = editMode or eq
 		b:ClearAllPoints()
-		if i == 1 then
-			b:SetPoint("TOPLEFT", dock, "TOPLEFT", 0, 0)
-		elseif db.vertical then
-			b:SetPoint("TOP", buttons[i - 1], "BOTTOM", 0, -GAP)
-		else
-			b:SetPoint("LEFT", buttons[i - 1], "RIGHT", GAP, 0)
+		if show then
+			shown = shown + 1
+			if not prev then
+				b:SetPoint("TOPLEFT", dock, "TOPLEFT", 0, 0)
+			elseif db.vertical then
+				b:SetPoint("TOP", prev, "BOTTOM", 0, -GAP)
+			else
+				b:SetPoint("LEFT", prev, "RIGHT", GAP, 0)
+			end
+			prev = b
 		end
+		b:SetShown(show)
 	end
-	if db.vertical then dock:SetSize(SIZE, SIZE * 2 + GAP) else dock:SetSize(SIZE * 2 + GAP, SIZE) end
+	if shown > 1 then
+		if db.vertical then dock:SetSize(SIZE, SIZE * shown + GAP * (shown - 1))
+		else dock:SetSize(SIZE * shown + GAP * (shown - 1), SIZE) end
+	else
+		dock:SetSize(SIZE, SIZE)
+	end
 	dock:ClearAllPoints()
 	local p = db.point
 	if p then dock:SetPoint(p[1], UIParent, p[2], p[3], p[4]) else dock:SetPoint("CENTER", UIParent, "CENTER", 0, -200) end
-	dock:SetShown(not db.hidden or editMode)
+	local visible = (not db.hidden and shown > 0) or editMode
+	if not visible then HideFlyout() end
+	dock:SetShown(visible)
 end
 
 -- Frame, background and opacity. None of it is protected, so it also applies in combat.
@@ -283,7 +312,25 @@ end
 -- Flyout
 ---------------------------------------------------------------------------
 
-local function HideFlyout()
+-- Own tooltip without supportsItemComparison, so hovering a trinket never opens the
+-- equipped comparison tooltips (ShoppingTooltip1/2), even with Always Compare Items or Shift.
+---@type GameTooltip
+local dockTip
+local function OpenTip(owner)
+	if not dockTip then
+		dockTip = CreateFrame("GameTooltip", "TrinketDockTooltip", UIParent, "GameTooltipTemplate") --[[@as GameTooltip]]
+		dockTip:SetFrameStrata("TOOLTIP")
+		dockTip:SetClampedToScreen(true)
+	end
+	dockTip:SetOwner(owner, "ANCHOR_RIGHT")
+	return dockTip
+end
+
+local function HideTip()
+	if dockTip then dockTip:Hide() end
+end
+
+HideFlyout = function()
 	if flyout then flyout:Hide() end
 end
 
@@ -309,13 +356,13 @@ local function FlyButton(i)
 	end)
 	fb:SetScript("OnEnter", function(self)
 		if not (db.tooltips and self.entry) then return end
-		GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
-		GameTooltip:SetBagItem(self.entry.bag, self.entry.slot)
-		GameTooltip:AddLine("Left-click: top slot   Right-click: bottom slot", 0.31, 0.76, 0.97)
-		if InCombatLockdown() then GameTooltip:AddLine("In combat: queued, swapped when combat ends", 1, 0.82, 0) end
-		GameTooltip:Show()
+		local t = OpenTip(self)
+		t:SetBagItem(self.entry.bag, self.entry.slot)
+		t:AddLine("Left-click: top slot   Right-click: bottom slot", 0.31, 0.76, 0.97)
+		if InCombatLockdown() then t:AddLine("In combat: queued, swapped when combat ends", 1, 0.82, 0) end
+		t:Show()
 	end)
-	fb:SetScript("OnLeave", function() GameTooltip:Hide() end)
+	fb:SetScript("OnLeave", HideTip)
 	flyButtons[i] = fb
 	return fb
 end
@@ -479,7 +526,7 @@ local function SetEditMode(on)
 	end
 	mover:Show()
 	HideFlyout()
-	dock:Show() -- also when hidden: it has to be placed somewhere
+	Layout() -- also when hidden or unequipped: both slots show so the dock can be placed
 end
 
 local function HookEditMode()
@@ -513,6 +560,9 @@ local function Create()
 	-- Closes when the mouse leaves both the flyout and its button. It stays usable in combat: clicks queue.
 	local flyElapsed = 0
 	flyout:SetScript("OnShow", function() flyElapsed = 0 end)
+	flyout:SetScript("OnHide", function()
+		if dockTip and dockTip:GetOwner() and dockTip:GetOwner():GetParent() == flyout then dockTip:Hide() end
+	end)
 	flyout:SetScript("OnUpdate", function(self, elapsed)
 		flyElapsed = flyElapsed + elapsed
 		if flyElapsed < 0.05 then return end
@@ -552,6 +602,7 @@ local function Create()
 		b:SetScript("OnDragStart", function()
 			if db.locked or not IsShiftKeyDown() or InCombatLockdown() then return end
 			dragging = true
+			HideTip()
 			HideFlyout()
 			dock:StartMoving()
 		end)
@@ -565,20 +616,20 @@ local function Create()
 		end)
 		b:SetScript("OnEnter", function(self)
 			if db.tooltips then
-				GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
+				local t = OpenTip(self)
 				if GetInventoryItemTexture("player", self.slot) then
-					GameTooltip:SetInventoryItem("player", self.slot)
+					t:SetInventoryItem("player", self.slot)
 				else
-					GameTooltip:SetText(self.slot == 13 and "Top trinket slot" or "Bottom trinket slot")
+					t:SetText(self.slot == 13 and "Top trinket slot" or "Bottom trinket slot")
 				end
 				local q = queue[self.slot]
-				if q then GameTooltip:AddLine("Queued after combat: " .. q.link, 1, 0.82, 0) end
-				if not db.locked then GameTooltip:AddLine("Shift-drag to move", 0.31, 0.76, 0.97) end
-				GameTooltip:Show()
+				if q then t:AddLine("Queued after combat: " .. q.link, 1, 0.82, 0) end
+				if not db.locked then t:AddLine("Shift-drag to move", 0.31, 0.76, 0.97) end
+				t:Show()
 			end
 			if not editMode then ShowFlyout(self) end
 		end)
-		b:SetScript("OnLeave", function() GameTooltip:Hide() end)
+		b:SetScript("OnLeave", HideTip)
 		b:SetScript("PostClick", function(self, mouse, down)
 			if ns.debug then
 				print(PREFIX .. ("click %s %s, combat %s, slot %d"):format(tostring(mouse), down and "down" or "up",

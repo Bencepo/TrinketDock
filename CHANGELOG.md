@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Empty trinket slots are now hidden automatically: with one trinket equipped only that slot is shown, and with none equipped the dock hides (still visible in Edit Mode).
+- Tooltips on the dock and in the flyout now show only the hovered trinket, without equipped comparison tooltips.
 - Settings window: "More from Bencepo" button in the footer links to all Bencepo addons (BencepoUI 6).
 - Code cleanup, no change in behaviour.
 
