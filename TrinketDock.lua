@@ -176,11 +176,23 @@ end
 -- Dock
 ---------------------------------------------------------------------------
 
+local Layout, HideFlyout
+
+local function SlotEquipped(slot)
+	return GetInventoryItemID("player", slot) ~= nil or GetInventoryItemTexture("player", slot) ~= nil
+end
+
 local function UpdateButton(b)
-	local tex = GetInventoryItemTexture("player", b.slot)
+	local id = GetInventoryItemID("player", b.slot)
+	local tex = GetInventoryItemTexture("player", b.slot) or (id and C_Item and C_Item.GetItemIconByID and C_Item.GetItemIconByID(id))
+	local equipped = id ~= nil or tex ~= nil
 	b.icon:SetTexture(tex or EMPTY_ICON)
 	b.icon:SetDesaturated(not tex)
 	SetCooldown(b.cd, GetInventoryItemCooldown("player", b.slot))
+	if b.equipped ~= equipped then
+		b.equipped = equipped
+		Layout()
+	end
 end
 
 local function UpdateCooldowns()
@@ -210,7 +222,7 @@ function UpdateQueue()
 end
 
 -- Secure buttons cannot be moved, scaled or hidden in combat: the change waits for combat to end.
-local function Layout()
+Layout = function()
 	if not dock then return end
 	if InCombatLockdown() then
 		pendingLayout = true
@@ -218,21 +230,38 @@ local function Layout()
 	end
 	pendingLayout = false
 	dock:SetScale(db.scale)
-	for i, b in ipairs(buttons) do
+	local shown = 0
+	local prev
+	for _, b in ipairs(buttons) do
+		local eq = SlotEquipped(b.slot)
+		b.equipped = eq
+		local show = editMode or eq
 		b:ClearAllPoints()
-		if i == 1 then
-			b:SetPoint("TOPLEFT", dock, "TOPLEFT", 0, 0)
-		elseif db.vertical then
-			b:SetPoint("TOP", buttons[i - 1], "BOTTOM", 0, -GAP)
-		else
-			b:SetPoint("LEFT", buttons[i - 1], "RIGHT", GAP, 0)
+		if show then
+			shown = shown + 1
+			if not prev then
+				b:SetPoint("TOPLEFT", dock, "TOPLEFT", 0, 0)
+			elseif db.vertical then
+				b:SetPoint("TOP", prev, "BOTTOM", 0, -GAP)
+			else
+				b:SetPoint("LEFT", prev, "RIGHT", GAP, 0)
+			end
+			prev = b
 		end
+		b:SetShown(show)
 	end
-	if db.vertical then dock:SetSize(SIZE, SIZE * 2 + GAP) else dock:SetSize(SIZE * 2 + GAP, SIZE) end
+	if shown > 1 then
+		if db.vertical then dock:SetSize(SIZE, SIZE * shown + GAP * (shown - 1))
+		else dock:SetSize(SIZE * shown + GAP * (shown - 1), SIZE) end
+	else
+		dock:SetSize(SIZE, SIZE)
+	end
 	dock:ClearAllPoints()
 	local p = db.point
 	if p then dock:SetPoint(p[1], UIParent, p[2], p[3], p[4]) else dock:SetPoint("CENTER", UIParent, "CENTER", 0, -200) end
-	dock:SetShown(not db.hidden or editMode)
+	local visible = (not db.hidden and shown > 0) or editMode
+	if not visible then HideFlyout() end
+	dock:SetShown(visible)
 end
 
 -- Frame, background and opacity. None of it is protected, so it also applies in combat.
@@ -301,7 +330,7 @@ local function HideTip()
 	if dockTip then dockTip:Hide() end
 end
 
-local function HideFlyout()
+HideFlyout = function()
 	if flyout then flyout:Hide() end
 end
 
@@ -497,7 +526,7 @@ local function SetEditMode(on)
 	end
 	mover:Show()
 	HideFlyout()
-	dock:Show() -- also when hidden: it has to be placed somewhere
+	Layout() -- also when hidden or unequipped: both slots show so the dock can be placed
 end
 
 local function HookEditMode()
